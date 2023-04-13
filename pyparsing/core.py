@@ -391,6 +391,28 @@ def null_debug_action(*args):
     """'Do-nothing' debug action, to suppress debugging output during parsing."""
 
 
+class MessageFragment:
+
+    def __init__(self, *args) -> None:
+        if args:
+            self.cache = list(args)
+        else:
+            self.cache = []
+
+    def __iadd__(self, other) -> None:
+        self.cache.append(other)
+
+    def copy(self) -> "MessageFragment":
+        res = MessageFragment(*self.cache)
+        return res
+
+    def __str__(self) -> str:
+        res = ""
+        for cache in self.cache:
+            res += str(cache)
+        return res
+
+
 class ParserElement(ABC):
     """Abstract base level parser element class."""
 
@@ -476,7 +498,7 @@ class ParserElement(ABC):
         self.streamlined = False
         # optimize exception handling for subclasses that don't advance parse index
         self.mayIndexError = True
-        self.errmsg = ""
+        self.errmsg = MessageFragment()
         # mark results names as modal (report only last) or cumulative (list all)
         self.modalResults = True
         # custom debug actions
@@ -822,7 +844,7 @@ class ParserElement(ABC):
                     try:
                         loc, tokens = self.parseImpl(instring, pre_loc, doActions)
                     except IndexError:
-                        raise ParseException(instring, len_instring, self.errmsg, self)
+                        raise ParseException(instring, len_instring, str(self.errmsg), self)
                 else:
                     loc, tokens = self.parseImpl(instring, pre_loc, doActions)
             except Exception as err:
@@ -844,7 +866,7 @@ class ParserElement(ABC):
                 try:
                     loc, tokens = self.parseImpl(instring, pre_loc, doActions)
                 except IndexError:
-                    raise ParseException(instring, len_instring, self.errmsg, self)
+                    raise ParseException(instring, len_instring, str(self.errmsg), self)
             else:
                 loc, tokens = self.parseImpl(instring, pre_loc, doActions)
 
@@ -909,7 +931,7 @@ class ParserElement(ABC):
         except ParseFatalException:
             if raise_fatal:
                 raise
-            raise ParseException(instring, loc, self.errmsg, self)
+            raise ParseException(instring, loc, str(self.errmsg), self)
 
     def can_parse_next(self, instring: str, loc: int) -> bool:
         try:
@@ -1877,7 +1899,7 @@ class ParserElement(ABC):
             Word(nums).set_name("integer").parse_string("ABC")  # -> Exception: Expected integer (at char 0), (line:1, col:1)
         """
         self.customName = name
-        self.errmsg = "Expected " + self.name
+        self.errmsg = MessageFragment("Expected ", self.name)
         if __diag__.enable_debug_on_named_expressions:
             self.set_debug()
         return self
@@ -2383,10 +2405,10 @@ class NoMatch(Token):
         super().__init__()
         self.mayReturnEmpty = True
         self.mayIndexError = False
-        self.errmsg = "Unmatchable token"
+        self.errmsg = MessageFragment("Unmatchable token")
 
     def parseImpl(self, instring, loc, doActions=True):
-        raise ParseException(instring, loc, self.errmsg, self)
+        raise ParseException(instring, loc, str(self.errmsg), self)
 
 
 class Literal(Token):
@@ -2427,7 +2449,7 @@ class Literal(Token):
         self.match = match_string
         self.matchLen = len(match_string)
         self.firstMatchChar = match_string[:1]
-        self.errmsg = "Expected " + self.name
+        self.errmsg = MessageFragment("Expected ", self.name)
         self.mayReturnEmpty = False
         self.mayIndexError = False
 
@@ -2439,7 +2461,7 @@ class Literal(Token):
             self.match, loc
         ):
             return loc + self.matchLen, self.match
-        raise ParseException(instring, loc, self.errmsg, self)
+        raise ParseException(instring, loc, str(self.errmsg), self)
 
 
 class Empty(Literal):
@@ -2463,7 +2485,7 @@ class _SingleCharLiteral(Literal):
     def parseImpl(self, instring, loc, doActions=True):
         if instring[loc] == self.firstMatchChar:
             return loc + 1, self.match
-        raise ParseException(instring, loc, self.errmsg, self)
+        raise ParseException(instring, loc, str(self.errmsg), self)
 
 
 ParserElement._literalStringClass = Literal
@@ -2518,7 +2540,7 @@ class Keyword(Token):
             self.firstMatchChar = match_string[0]
         except IndexError:
             raise ValueError("null string passed to Keyword; use Empty() instead")
-        self.errmsg = f"Expected {type(self).__name__} {self.name}"
+        self.errmsg = MessageFragment(f"Expected ", type(self).__name__, " ", self.name)
         self.mayReturnEmpty = False
         self.mayIndexError = False
         self.caseless = caseless
@@ -2531,7 +2553,7 @@ class Keyword(Token):
         return repr(self.match)
 
     def parseImpl(self, instring, loc, doActions=True):
-        errmsg = self.errmsg
+        errmsg = self.errmsg.copy()
         errloc = loc
         if self.caseless:
             if instring[loc : loc + self.matchLen].upper() == self.caselessmatch:
@@ -2575,7 +2597,7 @@ class Keyword(Token):
                     errloc = loc - 1
             # else no match just raise plain exception
 
-        raise ParseException(instring, errloc, errmsg, self)
+        raise ParseException(instring, errloc, str(errmsg), self)
 
     @staticmethod
     def set_default_keyword_chars(chars) -> None:
@@ -2606,12 +2628,12 @@ class CaselessLiteral(Literal):
         super().__init__(match_string.upper())
         # Preserve the defining literal.
         self.returnString = match_string
-        self.errmsg = "Expected " + self.name
+        self.errmsg = MessageFragment("Expected ", self.name)
 
     def parseImpl(self, instring, loc, doActions=True):
         if instring[loc : loc + self.matchLen].upper() == self.match:
             return loc + self.matchLen, self.returnString
-        raise ParseException(instring, loc, self.errmsg, self)
+        raise ParseException(instring, loc, str(self.errmsg), self)
 
 
 class CaselessKeyword(Keyword):
@@ -2686,7 +2708,7 @@ class CloseMatch(Token):
         super().__init__()
         self.match_string = match_string
         self.maxMismatches = maxMismatches
-        self.errmsg = f"Expected {self.match_string!r} (with up to {self.maxMismatches} mismatches)"
+        self.errmsg = MessageFragment("Expected ", f"{self.match_string!r}", "(with up to ", self.maxMismatches, " mismatches)")
         self.caseless = caseless
         self.mayIndexError = False
         self.mayReturnEmpty = False
@@ -2723,7 +2745,7 @@ class CloseMatch(Token):
                 results["mismatches"] = mismatches
                 return loc, results
 
-        raise ParseException(instring, loc, self.errmsg, self)
+        raise ParseException(instring, loc, str(self.errmsg), self)
 
 
 class Word(Token):
@@ -2858,7 +2880,7 @@ class Word(Token):
             self.maxLen = exact
             self.minLen = exact
 
-        self.errmsg = "Expected " + self.name
+        self.errmsg = MessageFragment("Expected ", self.name)
         self.mayIndexError = False
         self.asKeyword = asKeyword
         if self.asKeyword:
@@ -2942,7 +2964,7 @@ class Word(Token):
 
     def parseImpl(self, instring, loc, doActions=True):
         if instring[loc] not in self.initChars:
-            raise ParseException(instring, loc, self.errmsg, self)
+            raise ParseException(instring, loc, str(self.errmsg), self)
 
         start = loc
         loc += 1
@@ -2968,14 +2990,14 @@ class Word(Token):
                 throwException = True
 
         if throwException:
-            raise ParseException(instring, loc, self.errmsg, self)
+            raise ParseException(instring, loc, str(self.errmsg), self)
 
         return loc, instring[start:loc]
 
     def parseImpl_regex(self, instring, loc, doActions=True):
         result = self.re_match(instring, loc)
         if not result:
-            raise ParseException(instring, loc, self.errmsg, self)
+            raise ParseException(instring, loc, str(self.errmsg), self)
 
         loc = result.end()
         return loc, result.group()
@@ -3065,7 +3087,7 @@ class Regex(Token):
                 "Regex may only be constructed with a string or a compiled RE object"
             )
 
-        self.errmsg = "Expected " + self.name
+        self.errmsg = MessageFragment("Expected ", self.name)
         self.mayIndexError = False
         self.asGroupList = asGroupList
         self.asMatch = asMatch
@@ -3098,7 +3120,7 @@ class Regex(Token):
     def parseImpl(self, instring, loc, doActions=True):
         result = self.re_match(instring, loc)
         if not result:
-            raise ParseException(instring, loc, self.errmsg, self)
+            raise ParseException(instring, loc, str(self.errmsg), self)
 
         loc = result.end()
         ret = ParseResults(result.group())
@@ -3111,7 +3133,7 @@ class Regex(Token):
     def parseImplAsGroupList(self, instring, loc, doActions=True):
         result = self.re_match(instring, loc)
         if not result:
-            raise ParseException(instring, loc, self.errmsg, self)
+            raise ParseException(instring, loc, str(self.errmsg), self)
 
         loc = result.end()
         ret = result.groups()
@@ -3120,7 +3142,7 @@ class Regex(Token):
     def parseImplAsMatch(self, instring, loc, doActions=True):
         result = self.re_match(instring, loc)
         if not result:
-            raise ParseException(instring, loc, self.errmsg, self)
+            raise ParseException(instring, loc, str(self.errmsg), self)
 
         loc = result.end()
         ret = result
@@ -3314,7 +3336,7 @@ class QuotedString(Token):
         except re.error:
             raise ValueError(f"invalid pattern {self.pattern!r} passed to Regex")
 
-        self.errmsg = "Expected " + self.name
+        self.errmsg = MessageFragment("Expected ", self.name)
         self.mayIndexError = False
         self.mayReturnEmpty = True
 
@@ -3331,7 +3353,7 @@ class QuotedString(Token):
             or None
         )
         if not result:
-            raise ParseException(instring, loc, self.errmsg, self)
+            raise ParseException(instring, loc, str(self.errmsg), self)
 
         loc = result.end()
         ret = result.group()
@@ -3415,7 +3437,7 @@ class CharsNotIn(Token):
             self.maxLen = exact
             self.minLen = exact
 
-        self.errmsg = "Expected " + self.name
+        self.errmsg = MessageFragment("Expected ", self.name)
         self.mayReturnEmpty = self.minLen == 0
         self.mayIndexError = False
 
@@ -3429,7 +3451,7 @@ class CharsNotIn(Token):
     def parseImpl(self, instring, loc, doActions=True):
         notchars = self.notCharsSet
         if instring[loc] in notchars:
-            raise ParseException(instring, loc, self.errmsg, self)
+            raise ParseException(instring, loc, str(self.errmsg), self)
 
         start = loc
         loc += 1
@@ -3438,7 +3460,7 @@ class CharsNotIn(Token):
             loc += 1
 
         if loc - start < self.minLen:
-            raise ParseException(instring, loc, self.errmsg, self)
+            raise ParseException(instring, loc, str(self.errmsg), self)
 
         return loc, instring[start:loc]
 
@@ -3488,7 +3510,7 @@ class White(Token):
         )
         # self.leave_whitespace()
         self.mayReturnEmpty = True
-        self.errmsg = "Expected " + self.name
+        self.errmsg = MessageFragment("Expected ", self.name)
 
         self.minLen = min
 
@@ -3506,7 +3528,7 @@ class White(Token):
 
     def parseImpl(self, instring, loc, doActions=True):
         if instring[loc] not in self.matchWhite:
-            raise ParseException(instring, loc, self.errmsg, self)
+            raise ParseException(instring, loc, str(self.errmsg), self)
         start = loc
         loc += 1
         maxloc = start + self.maxLen
@@ -3515,7 +3537,7 @@ class White(Token):
             loc += 1
 
         if loc - start < self.minLen:
-            raise ParseException(instring, loc, self.errmsg, self)
+            raise ParseException(instring, loc, str(self.errmsg), self)
 
         return loc, instring[start:loc]
 
@@ -3587,7 +3609,7 @@ class LineStart(PositionToken):
         self.orig_whiteChars = set() | self.whiteChars
         self.whiteChars.discard("\n")
         self.skipper = Empty().set_whitespace_chars(self.whiteChars)
-        self.errmsg = "Expected start of line"
+        self.errmsg = MessageFragment("Expected start of line")
 
     def preParse(self, instring: str, loc: int) -> int:
         if loc == 0:
@@ -3602,7 +3624,7 @@ class LineStart(PositionToken):
     def parseImpl(self, instring, loc, doActions=True):
         if col(loc, instring) == 1:
             return loc, []
-        raise ParseException(instring, loc, self.errmsg, self)
+        raise ParseException(instring, loc, str(self.errmsg), self)
 
 
 class LineEnd(PositionToken):
@@ -3614,18 +3636,18 @@ class LineEnd(PositionToken):
         super().__init__()
         self.whiteChars.discard("\n")
         self.set_whitespace_chars(self.whiteChars, copy_defaults=False)
-        self.errmsg = "Expected end of line"
+        self.errmsg = MessageFragment("Expected end of line")
 
     def parseImpl(self, instring, loc, doActions=True):
         if loc < len(instring):
             if instring[loc] == "\n":
                 return loc + 1, "\n"
             else:
-                raise ParseException(instring, loc, self.errmsg, self)
+                raise ParseException(instring, loc, str(self.errmsg), self)
         elif loc == len(instring):
             return loc + 1, []
         else:
-            raise ParseException(instring, loc, self.errmsg, self)
+            raise ParseException(instring, loc, str(self.errmsg), self)
 
 
 class StringStart(PositionToken):
@@ -3635,13 +3657,13 @@ class StringStart(PositionToken):
 
     def __init__(self):
         super().__init__()
-        self.errmsg = "Expected start of text"
+        self.errmsg = MessageFragment("Expected start of text")
 
     def parseImpl(self, instring, loc, doActions=True):
         if loc != 0:
             # see if entire string up to here is just whitespace and ignoreables
             if loc != self.preParse(instring, 0):
-                raise ParseException(instring, loc, self.errmsg, self)
+                raise ParseException(instring, loc, str(self.errmsg), self)
         return loc, []
 
 
@@ -3652,17 +3674,17 @@ class StringEnd(PositionToken):
 
     def __init__(self):
         super().__init__()
-        self.errmsg = "Expected end of text"
+        self.errmsg = MessageFragment("Expected end of text")
 
     def parseImpl(self, instring, loc, doActions=True):
         if loc < len(instring):
-            raise ParseException(instring, loc, self.errmsg, self)
+            raise ParseException(instring, loc, str(self.errmsg), self)
         elif loc == len(instring):
             return loc + 1, []
         elif loc > len(instring):
             return loc, []
         else:
-            raise ParseException(instring, loc, self.errmsg, self)
+            raise ParseException(instring, loc, str(self.errmsg), self)
 
 
 class WordStart(PositionToken):
@@ -3679,7 +3701,7 @@ class WordStart(PositionToken):
         wordChars = word_chars if wordChars == printables else wordChars
         super().__init__()
         self.wordChars = set(wordChars)
-        self.errmsg = "Not at the start of a word"
+        self.errmsg = MessageFragment("Not at the start of a word")
 
     def parseImpl(self, instring, loc, doActions=True):
         if loc != 0:
@@ -3687,7 +3709,7 @@ class WordStart(PositionToken):
                 instring[loc - 1] in self.wordChars
                 or instring[loc] not in self.wordChars
             ):
-                raise ParseException(instring, loc, self.errmsg, self)
+                raise ParseException(instring, loc, str(self.errmsg), self)
         return loc, []
 
 
@@ -3705,7 +3727,7 @@ class WordEnd(PositionToken):
         super().__init__()
         self.wordChars = set(wordChars)
         self.skipWhitespace = False
-        self.errmsg = "Not at the end of a word"
+        self.errmsg = MessageFragment("Not at the end of a word")
 
     def parseImpl(self, instring, loc, doActions=True):
         instrlen = len(instring)
@@ -3714,7 +3736,7 @@ class WordEnd(PositionToken):
                 instring[loc] in self.wordChars
                 or instring[loc - 1] not in self.wordChars
             ):
-                raise ParseException(instring, loc, self.errmsg, self)
+                raise ParseException(instring, loc, str(self.errmsg), self)
         return loc, []
 
 
@@ -3834,7 +3856,7 @@ class ParseExpression(ParserElement):
                 self.mayReturnEmpty |= other.mayReturnEmpty
                 self.mayIndexError |= other.mayIndexError
 
-        self.errmsg = "Expected " + str(self)
+        self.errmsg = MessageFragment("Expected ", self)
 
         return self
 
@@ -4025,7 +4047,7 @@ class And(ParseExpression):
                     raise ParseSyntaxException._from_exception(pe)
                 except IndexError:
                     raise ParseSyntaxException(
-                        instring, len(instring), self.errmsg, self
+                        instring, len(instring), str(self.errmsg), self
                     )
             else:
                 loc, exprtokens = e._parse(instring, loc, doActions)
@@ -4117,7 +4139,7 @@ class Or(ParseExpression):
             except IndexError:
                 if len(instring) > maxExcLoc:
                     maxException = ParseException(
-                        instring, len(instring), e.errmsg, self
+                        instring, len(instring), str(e.errmsg), self
                     )
                     maxExcLoc = len(instring)
             else:
@@ -4170,7 +4192,7 @@ class Or(ParseExpression):
             # infer from this check that all alternatives failed at the current position
             # so emit this collective error message instead of any single error message
             if maxExcLoc == loc:
-                maxException.msg = self.errmsg
+                maxException.msg = str(self.errmsg)
             raise maxException
         else:
             raise ParseException(
@@ -4278,7 +4300,7 @@ class MatchFirst(ParseExpression):
             except IndexError:
                 if len(instring) > maxExcLoc:
                     maxException = ParseException(
-                        instring, len(instring), e.errmsg, self
+                        instring, len(instring), str(e.errmsg), self
                     )
                     maxExcLoc = len(instring)
 
@@ -4286,7 +4308,7 @@ class MatchFirst(ParseExpression):
             # infer from this check that all alternatives failed at the current position
             # so emit this collective error message instead of any individual error message
             if maxExcLoc == loc:
-                maxException.msg = self.errmsg
+                maxException.msg = str(self.errmsg)
             raise maxException
         else:
             raise ParseException(
@@ -4540,7 +4562,7 @@ class ParseElementEnhance(ParserElement):
             try:
                 return self.expr._parse(instring, loc, doActions, callPreParse=False)
             except ParseBaseException as pbe:
-                pbe.msg = self.errmsg
+                pbe.msg = str(self.errmsg)
                 raise
         else:
             raise ParseException(instring, loc, "No expression defined", self)
@@ -4623,13 +4645,13 @@ class IndentedBlock(ParseElementEnhance):
     class _Indent(Empty):
         def __init__(self, ref_col: int):
             super().__init__()
-            self.errmsg = f"expected indent at column {ref_col}"
+            self.errmsg = MessageFragment("expected indent at column ", ref_col)
             self.add_condition(lambda s, l, t: col(l, s) == ref_col)
 
     class _IndentGreater(Empty):
         def __init__(self, ref_col: int):
             super().__init__()
-            self.errmsg = f"expected indent at column greater than {ref_col}"
+            self.errmsg = MessageFragment("expected indent at column greater than ", ref_col)
             self.add_condition(lambda s, l, t: col(l, s) > ref_col)
 
     def __init__(
@@ -4820,21 +4842,21 @@ class PrecededBy(ParseElementEnhance):
             retreat = 0
             self.exact = True
         self.retreat = retreat
-        self.errmsg = "not preceded by " + str(expr)
+        self.errmsg = MessageFragment("not preceded by ", expr)
         self.skipWhitespace = False
         self.parseAction.append(lambda s, l, t: t.__delitem__(slice(None, None)))
 
     def parseImpl(self, instring, loc=0, doActions=True):
         if self.exact:
             if loc < self.retreat:
-                raise ParseException(instring, loc, self.errmsg)
+                raise ParseException(instring, loc, str(self.errmsg))
             start = loc - self.retreat
             _, ret = self.expr._parse(instring, start)
         else:
             # retreat specified a maximum lookbehind window, iterate
             test_expr = self.expr + StringEnd()
             instring_slice = instring[max(0, loc - self.retreat) : loc]
-            last_expr = ParseException(instring, loc, self.errmsg)
+            last_expr = ParseException(instring, loc, str(self.errmsg))
             for offset in range(1, min(loc, self.retreat + 1) + 1):
                 try:
                     # print('trying', offset, instring_slice, repr(instring_slice[loc - offset:]))
@@ -4924,11 +4946,11 @@ class NotAny(ParseElementEnhance):
         self.skipWhitespace = False
 
         self.mayReturnEmpty = True
-        self.errmsg = "Found unwanted token, " + str(self.expr)
+        self.errmsg = MessageFragment("Found unwanted token, ", self.expr)
 
     def parseImpl(self, instring, loc, doActions=True):
         if self.expr.can_parse_next(instring, loc):
-            raise ParseException(instring, loc, self.errmsg, self)
+            raise ParseException(instring, loc, str(self.errmsg), self)
         return loc, []
 
     def _generateDefaultName(self) -> str:
@@ -5311,7 +5333,7 @@ class SkipTo(ParseElementEnhance):
             self.failOn = self._literalStringClass(failOn)
         else:
             self.failOn = failOn
-        self.errmsg = "No match found for " + str(self.expr)
+        self.errmsg = MessageFragment("No match found for ", self.expr)
 
     def parseImpl(self, instring, loc, doActions=True):
         startloc = loc
@@ -5344,7 +5366,7 @@ class SkipTo(ParseElementEnhance):
 
         else:
             # ran off the end of the input string without matching skipto expr, fail
-            raise ParseException(instring, loc, self.errmsg, self)
+            raise ParseException(instring, loc, str(self.errmsg), self)
 
         # build up return values
         loc = tmploc
