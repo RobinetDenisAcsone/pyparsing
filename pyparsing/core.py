@@ -4308,7 +4308,7 @@ class MatchFirst(ParseExpression):
             # infer from this check that all alternatives failed at the current position
             # so emit this collective error message instead of any individual error message
             if maxExcLoc == loc:
-                maxException.msg = str(self.errmsg)
+                maxException.msg = self.errmsg
             raise maxException
         else:
             raise ParseException(
@@ -4562,7 +4562,7 @@ class ParseElementEnhance(ParserElement):
             try:
                 return self.expr._parse(instring, loc, doActions, callPreParse=False)
             except ParseBaseException as pbe:
-                pbe.msg = str(self.errmsg)
+                pbe.msg = self.errmsg
                 raise
         else:
             raise ParseException(instring, loc, "No expression defined", self)
